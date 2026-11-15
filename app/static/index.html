@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>In-Car AI Agent Hub</title>
+<style>
+  :root { --bg:#0b0f14; --panel:#131a22; --line:#232e3a; --text:#e6edf3; --muted:#8b98a5;
+          --accent:#1c69d4; --mcp:#2da44e; --a2a:#d29922; --err:#f85149; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:18px 24px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; font-weight:600; }
+  header .sub { color:var(--muted); font-size:13px; }
+  header input { margin-left:auto; background:var(--panel); border:1px solid var(--line); color:var(--text);
+                 padding:6px 10px; border-radius:6px; width:200px; }
+  main { display:grid; grid-template-columns: 280px 1fr; gap:20px; padding:20px 24px; max-width:1200px; margin:auto; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .car h2, .trace h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 12px; }
+  .stat { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line); }
+  .stat:last-of-type { border:0; }
+  .stat span:first-child { color:var(--muted); }
+  .battery { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin:4px 0 10px; }
+  .battery div { height:100%; background:var(--mcp); transition:width .4s; }
+  button { background:var(--accent); color:white; border:0; padding:9px 14px; border-radius:6px; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--muted); margin-top:12px; width:100%; }
+  button:disabled { opacity:.5; cursor:wait; }
+  .chat { display:flex; flex-direction:column; gap:14px; }
+  .examples { display:flex; gap:8px; flex-wrap:wrap; }
+  .examples button { background:transparent; border:1px solid var(--line); color:var(--text); font-size:13px; padding:6px 10px; }
+  form { display:flex; gap:8px; }
+  form input { flex:1; background:var(--panel); border:1px solid var(--line); color:var(--text); padding:10px 12px; border-radius:6px; font:inherit; }
+  .msg { padding:12px 14px; border-radius:10px; max-width:85%; white-space:pre-wrap; }
+  .user { background:var(--accent); align-self:flex-end; }
+  .bot { background:var(--panel); border:1px solid var(--line); }
+  .mode { font-size:12px; color:var(--muted); margin-top:6px; }
+  .step { font:12.5px/1.4 ui-monospace, Consolas, monospace; padding:8px 0; border-top:1px solid var(--line); }
+  .badge { display:inline-block; font-size:11px; font-weight:700; padding:1px 6px; border-radius:4px; margin-right:6px; color:#0b0f14; }
+  .MCP { background:var(--mcp); } .A2A { background:var(--a2a); }
+  .fail { color:var(--err); }
+  details summary { cursor:pointer; color:var(--muted); }
+  pre { white-space:pre-wrap; word-break:break-word; margin:6px 0 0; color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>In-Car AI Agent Hub</h1>
+  <span class="sub">LLM tool calling · <b style="color:var(--mcp)">MCP</b> vehicle tools · <b style="color:var(--a2a)">A2A</b> charging agent</span>
+  <input id="key" type="password" placeholder="API key" autocomplete="off">
+</header>
+<main>
+  <div>
+    <div class="panel car">
+      <h2>Vehicle</h2>
+      <div id="car">Loading…</div>
+      <button class="ghost" id="reset">Reset demo car</button>
+    </div>
+  </div>
+  <div class="chat">
+    <div class="examples">
+      <button>I'm cold and need to charge before Berlin</button>
+      <button>What's my battery and range?</button>
+      <button>Take me to Stuttgart</button>
+      <button>Set the temperature to 35 degrees</button>
+    </div>
+    <form id="form"><input id="input" placeholder="Talk to your car…" autocomplete="off"><button id="send">Send</button></form>
+    <div id="log" class="chat"></div>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const keyInput = $("key");
+try { keyInput.value = sessionStorage.getItem("apiKey") || ""; } catch (e) {}
+keyInput.addEventListener("change", () => { try { sessionStorage.setItem("apiKey", keyInput.value); } catch (e) {} refresh(); });
+
+async function api(path, options = {}) {
+  const res = await fetch(path, { ...options, headers: { "content-type": "application/json", "X-API-Key": keyInput.value, ...(options.headers || {}) } });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.error || res.statusText);
+  return data;
+}
+
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c])); }
+
+function renderCar(v) {
+  const nav = v.navigation ? `${esc(v.navigation.destination)} (${v.navigation.distance_km} km)` +
+    (v.navigation.charging_stops.length ? `<br><small>via ${v.navigation.charging_stops.map(esc).join(", ")}</small>` : "") : "—";
+  $("car").innerHTML = `
+    <div class="stat"><span>Model</span><span>${esc(v.model)}</span></div>
+    <div class="stat"><span>Battery</span><span>${v.battery_pct}% · ${v.range_km} km</span></div>
+    <div class="battery"><div style="width:${v.battery_pct}%"></div></div>
+    <div class="stat"><span>Cabin</span><span>${v.cabin_temp_c} °C ${v.climate_on ? "· climate on" : ""}</span></div>
+    <div class="stat"><span>Location</span><span>${esc(v.location)}</span></div>
+    <div class="stat"><span>Navigation</span><span style="text-align:right">${nav}</span></div>`;
+}
+
+async function refresh() {
+  try { renderCar(await api("/api/vehicle")); } catch (e) { $("car").textContent = "🔒 " + e.message; }
+}
+
+function addMessage(cls, html) {
+  const div = document.createElement("div");
+  div.className = "msg " + cls;
+  div.innerHTML = html;
+  $("log").prepend(div);  // newest exchange on top, right under the input
+  return div;
+}
+
+async function send(text) {
+  if (!text.trim()) return;
+  $("send").disabled = true;
+  const pending = addMessage("bot", "Thinking…");
+  addMessage("user", esc(text));  // prepended last, so it sits above the reply
+  try {
+    const r = await api("/api/chat", { method: "POST", body: JSON.stringify({ message: text }) });
+    const steps = r.steps.map(s => `<div class="step"><span class="badge ${s.protocol}">${s.protocol}</span>` +
+      `<b class="${s.ok ? "" : "fail"}">${esc(s.tool)}</b>(${esc(JSON.stringify(s.arguments))}) · ${s.ms} ms` +
+      `<details><summary>result</summary><pre>${esc(JSON.stringify(s.result, null, 2))}</pre></details></div>`).join("");
+    pending.innerHTML = `${esc(r.answer)}<div class="mode">${esc(r.mode)} · ${r.steps.length} tool call(s)</div>${steps}`;
+    renderCar(r.vehicle);
+  } catch (e) {
+    pending.innerHTML = `<span class="fail">Error: ${esc(e.message)}</span>`;
+  } finally {
+    $("send").disabled = false;
+  }
+}
+
+$("form").addEventListener("submit", (e) => { e.preventDefault(); const t = $("input").value; $("input").value = ""; send(t); });
+document.querySelectorAll(".examples button").forEach(b => b.addEventListener("click", () => send(b.textContent)));
+$("reset").addEventListener("click", async () => { try { renderCar(await api("/api/reset", { method: "POST" })); } catch (e) { alert(e.message); } });
+refresh();
+</script>
+</body>
+</html>
