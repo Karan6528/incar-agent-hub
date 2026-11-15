@@ -16,15 +16,7 @@ I kept reading about MCP and A2A but hadn't used either of them. I wanted to fin
 
 ## How it works
 
-```mermaid
-flowchart LR
-    U[UI / driver] --> H[Host agent<br/>LLM + tool calling]
-    H <--> L[(LLM via Groq / OpenAI / Ollama)]
-    H -->|MCP| M[MCP server<br/>car tools]
-    H -->|A2A| C[Charging planner agent]
-    M --> V[(mock car + map data)]
-    C --> V
-```
+![architecture](docs/architecture.svg)
 
 There are three parts, all in one FastAPI app for now:
 
